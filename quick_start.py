@@ -73,7 +73,7 @@ def _():
 
 @app.cell(hide_code=True)
 def _(mo, use_mock):
-    _MOCK_URL = "https://mock.api.plume.tech"
+    _MOCK_URL = "https://virtserver.swaggerhub.com/plumedesigninc-c7a/plume/next"
     (
         mo.callout(
             mo.md(
@@ -98,7 +98,7 @@ def _(mo, use_mock):
 
 @app.cell
 def _(os, use_mock):
-    MOCK_BASE_URL = "https://mock.api.plume.tech"
+    MOCK_BASE_URL = "https://virtserver.swaggerhub.com/plumedesigninc-c7a/plume/next"
 
     _api_url    = MOCK_BASE_URL if use_mock else os.environ.get("API_URL", "")
     _auth_url   = f"{MOCK_BASE_URL}/v1/token" if use_mock else os.environ.get("AUTH_TOKEN_URL", "")
