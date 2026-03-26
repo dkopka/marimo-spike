@@ -48,6 +48,79 @@ def _(mo):
     return
 
 
+# ── Mock / Live toggle ─────────────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ---
+    ## Environment
+
+    Toggle **Mock mode** to run against a sandboxed server that returns realistic pre-defined data —
+    no real credentials needed, works directly in the browser.
+
+    Switch it off when running the notebook **locally** (`marimo edit quick_start.py`) with your
+    real API credentials.
+    """)
+    return
+
+
+@app.cell
+def _():
+    use_mock = True
+    return (use_mock,)
+
+
+@app.cell(hide_code=True)
+def _(mo, use_mock):
+    _MOCK_URL = "https://mock.api.plume.tech"
+    (
+        mo.callout(
+            mo.md(
+                f"🧪 **Mock mode ON** — requests go to `{_MOCK_URL}`.\n\n"
+                "Responses are pre-defined. No real credentials required. "
+                "Data never leaves your browser."
+            ),
+            kind="info",
+        )
+        if use_mock
+        else mo.callout(
+            mo.md(
+                "🔴 **Live mode** — requests go to the real Plume API.\n\n"
+                "Run this notebook locally with `marimo edit quick_start.py` and "
+                "provide your real credentials below."
+            ),
+            kind="warn",
+        )
+    )
+    return
+
+
+@app.cell
+def _(os, use_mock):
+    MOCK_BASE_URL = "https://mock.api.plume.tech"
+
+    _api_url    = MOCK_BASE_URL if use_mock else os.environ.get("API_URL", "")
+    _auth_url   = f"{MOCK_BASE_URL}/v1/token" if use_mock else os.environ.get("AUTH_TOKEN_URL", "")
+    _auth_hdr   = "Basic mock" if use_mock else os.environ.get("AUTH_HEADER", "")
+    _scope      = "partnerId:mock role:partnerIdAdmin" if use_mock else os.environ.get("AUTH_SCOPE", "")
+    _partner_id = "6971f4934016be004a041191" if use_mock else os.environ.get("PARTNER_ID", "")
+
+    effective_api_url    = _api_url
+    effective_auth_url   = _auth_url
+    effective_auth_hdr   = _auth_hdr
+    effective_scope      = _scope
+    effective_partner_id = _partner_id
+    return (
+        MOCK_BASE_URL,
+        effective_api_url,
+        effective_auth_hdr,
+        effective_auth_url,
+        effective_partner_id,
+        effective_scope,
+    )
+
+
 # ── Step 1 — Generate an Access Token ─────────────────────────────────────────
 
 @app.cell(hide_code=True)
@@ -63,8 +136,7 @@ def _(mo):
     - **Authorization Header** — `Basic <base64(clientId:clientSecret)>` (shown **once** in the Portal — store it safely)
     - **Scope** — controls which APIs the token can access
 
-    > 💡 Load secrets from environment variables rather than pasting them here:
-    > `AUTH_TOKEN_URL`, `AUTH_HEADER`, `AUTH_SCOPE`.
+    > 💡 In live mode, load secrets from environment variables: `AUTH_TOKEN_URL`, `AUTH_HEADER`, `AUTH_SCOPE`.
 
     > ⚠️ Reuse access tokens until they expire — do **not** mint a new token per API call.
     """)
@@ -72,51 +144,33 @@ def _(mo):
 
 
 @app.cell
-def _(mo, os):
-    auth_token_url = mo.ui.text(
-        value=os.environ.get("AUTH_TOKEN_URL", ""),
-        placeholder="https://yourco.okta.com/oauth2/default/v1/token",
-        label="Authorization Token URL",
-        full_width=True,
-    )
-    auth_header_input = mo.ui.text(
-        value=os.environ.get("AUTH_HEADER", ""),
-        placeholder="Basic dXNlcjpwYXNzd29yZA==",
-        label="Authorization Header",
-        full_width=True,
-    )
-    scope_input = mo.ui.text(
-        value=os.environ.get("AUTH_SCOPE", ""),
-        placeholder="partnerId:6971f4934016be004a041191 role:partnerIdAdmin",
-        label="Scope",
-        full_width=True,
-    )
-    mint_button = mo.ui.run_button(label="🔑 Mint Access Token")
-    mo.vstack([auth_token_url, auth_header_input, scope_input, mint_button])
-    return auth_header_input, auth_token_url, mint_button, scope_input
+def _(effective_auth_hdr, effective_auth_url, effective_scope):
+    auth_token_url    = effective_auth_url
+    auth_header_input = effective_auth_hdr
+    scope_input       = effective_scope
+    return auth_header_input, auth_token_url, scope_input
 
 
 @app.cell
-def _(auth_header_input, auth_token_url, mint_button, mo, requests, scope_input):
+def _(auth_header_input, auth_token_url, mo, requests, scope_input):
     access_token = None
-    if mint_button.value:
-        try:
-            _resp = requests.post(
-                auth_token_url.value,
-                headers={
-                    "Authorization": auth_header_input.value,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "grant_type": "client_credentials",
-                    "scope": scope_input.value,
-                },
-                timeout=10,
-            )
-            _resp.raise_for_status()
-            access_token = _resp.json().get("access_token")
-        except Exception as _e:
-            access_token = None
+    try:
+        _resp = requests.post(
+            auth_token_url,
+            headers={
+                "Authorization": auth_header_input,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": scope_input,
+            },
+            timeout=10,
+        )
+        _resp.raise_for_status()
+        access_token = _resp.json().get("access_token")
+    except Exception as _e:
+        access_token = None
 
     (
         mo.callout(
@@ -128,8 +182,8 @@ def _(auth_header_input, auth_token_url, mint_button, mo, requests, scope_input)
         )
         if access_token
         else mo.callout(
-            mo.md("Fill in your credentials above and click **🔑 Mint Access Token** to continue."),
-            kind="info",
+            mo.md("❌ Failed to mint access token. Check your credentials."),
+            kind="danger",
         )
     )
     return (access_token,)
@@ -143,28 +197,16 @@ def _(mo):
     ---
     ## Step 2 — Set Connection Details
 
-    Set your API base URL and Partner ID. These are used in every subsequent request.
-
-    You can also set them from the environment: `API_URL`, `PARTNER_ID`.
+    Your API base URL and Partner ID. Pre-filled from mock defaults when in mock mode,
+    or from `API_URL` / `PARTNER_ID` environment variables in live mode.
     """)
     return
 
 
 @app.cell
-def _(mo, os):
-    api_url_input = mo.ui.text(
-        value=os.environ.get("API_URL", ""),
-        placeholder="https://api.usw2.prod.plume.tech",
-        label="API Base URL",
-        full_width=True,
-    )
-    partner_id_input = mo.ui.text(
-        value=os.environ.get("PARTNER_ID", ""),
-        placeholder="6971f4934016be004a041191",
-        label="Partner ID",
-        full_width=True,
-    )
-    mo.vstack([api_url_input, partner_id_input])
+def _(effective_api_url, effective_partner_id):
+    api_url_input    = effective_api_url
+    partner_id_input = effective_partner_id
     return api_url_input, partner_id_input
 
 
@@ -187,29 +229,16 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    user_name_input = mo.ui.text(
-        value="Jane Doe",
-        placeholder="Jane Doe",
-        label="Name",
-        full_width=True,
-    )
-    user_email_input = mo.ui.text(
-        value="jdoe369@example.com",
-        placeholder="jdoe369@example.com",
-        label="Email",
-        full_width=True,
-    )
-    create_user_button = mo.ui.run_button(label="👤 Create User")
-    mo.vstack([user_name_input, user_email_input, create_user_button])
-    return create_user_button, user_email_input, user_name_input
+def _():
+    user_name_input  = "Jane Doe"
+    user_email_input = "jdoe369@example.com"
+    return user_email_input, user_name_input
 
 
 @app.cell
 def _(
     access_token,
     api_url_input,
-    create_user_button,
     json,
     mo,
     partner_id_input,
@@ -221,27 +250,26 @@ def _(
     location_id = None
     create_user_response = None
 
-    if create_user_button.value:
-        try:
-            _resp = requests.post(
-                f"{api_url_input.value}/v1/users",
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
-                json={
-                    "name": user_name_input.value,
-                    "email": user_email_input.value,
-                    "partnerId": partner_id_input.value,
-                },
-                timeout=10,
-            )
-            _resp.raise_for_status()
-            create_user_response = _resp.json()
-            user_id = create_user_response.get("id")
-            location_id = create_user_response.get("location", {}).get("id")
-        except Exception as _e:
-            create_user_response = {"error": str(_e)}
+    try:
+        _resp = requests.post(
+            f"{api_url_input}/v1/users",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            json={
+                "name": user_name_input,
+                "email": user_email_input,
+                "partnerId": partner_id_input,
+            },
+            timeout=10,
+        )
+        _resp.raise_for_status()
+        create_user_response = _resp.json()
+        user_id = create_user_response.get("id")
+        location_id = create_user_response.get("location", {}).get("id")
+    except Exception as _e:
+        create_user_response = {"error": str(_e)}
 
     (
         mo.vstack([
@@ -257,16 +285,9 @@ def _(
             mo.md(f"```json\n{json.dumps(create_user_response, indent=2)}\n```"),
         ])
         if user_id
-        else (
-            mo.callout(
-                mo.md(f"❌ **Error:** `{create_user_response.get('error')}`"),
-                kind="danger",
-            )
-            if create_user_response and "error" in create_user_response
-            else mo.callout(
-                mo.md("Complete Steps 1 & 2, then click **👤 Create User**."),
-                kind="info",
-            )
+        else mo.callout(
+            mo.md(f"❌ **Error:** `{create_user_response.get('error') if create_user_response else 'Unknown error'}`"),
+            kind="danger",
         )
     )
     return create_user_response, location_id, user_id
@@ -293,7 +314,7 @@ def _(access_token, api_url_input, json, location_id, mo, requests):
     if location_id:
         try:
             _resp = requests.get(
-                f"{api_url_input.value}/v1/locations/{location_id}",
+                f"{api_url_input}/v1/locations/{location_id}",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10,
             )
@@ -352,16 +373,9 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    account_id_input = mo.ui.text(
-        value="9eec69a9-5e27-4110-bdf3-146ed14e1632",
-        placeholder="your-crm-account-uuid",
-        label="accountId (your CRM reference for this customer)",
-        full_width=True,
-    )
-    update_account_button = mo.ui.run_button(label="✏️ Update accountId")
-    mo.vstack([account_id_input, update_account_button])
-    return account_id_input, update_account_button
+def _():
+    account_id_input = "9eec69a9-5e27-4110-bdf3-146ed14e1632"
+    return (account_id_input,)
 
 
 @app.cell
@@ -372,19 +386,18 @@ def _(
     json,
     mo,
     requests,
-    update_account_button,
     user_id,
 ):
     updated_user = None
-    if update_account_button.value and user_id:
+    if user_id:
         try:
             _resp = requests.patch(
-                f"{api_url_input.value}/v1/users/{user_id}",
+                f"{api_url_input}/v1/users/{user_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json; charset=utf-8",
                 },
-                json={"accountId": account_id_input.value},
+                json={"accountId": account_id_input},
                 timeout=10,
             )
             _resp.raise_for_status()
@@ -405,7 +418,7 @@ def _(
             )
             if updated_user and "error" in updated_user
             else mo.callout(
-                mo.md("Complete Step 3 first, then click **✏️ Update accountId**."),
+                mo.md("Complete Step 3 first."),
                 kind="info",
             )
         )
@@ -420,27 +433,11 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    service_id_input = mo.ui.text(
-        value="92283fcf-abbe-4580-ab0f-82a99ebda411",
-        placeholder="your-crm-service-contract-uuid",
-        label="serviceId (contract/subscription reference)",
-        full_width=True,
-    )
-    location_name_input = mo.ui.text(
-        value="CentralParkApartment",
-        placeholder="CentralParkApartment",
-        label="Location name",
-        full_width=True,
-    )
-    location_type_input = mo.ui.dropdown(
-        options=["RESIDENTIAL", "SMALL_BUSINESS"],
-        value="RESIDENTIAL",
-        label="Location type",
-    )
-    update_location_button = mo.ui.run_button(label="✏️ Update serviceId")
-    mo.vstack([service_id_input, location_name_input, location_type_input, update_location_button])
-    return location_name_input, location_type_input, service_id_input, update_location_button
+def _():
+    service_id_input    = "92283fcf-abbe-4580-ab0f-82a99ebda411"
+    location_name_input = "CentralParkApartment"
+    location_type_input = "RESIDENTIAL"
+    return location_name_input, location_type_input, service_id_input
 
 
 @app.cell
@@ -454,21 +451,20 @@ def _(
     mo,
     requests,
     service_id_input,
-    update_location_button,
 ):
     updated_location = None
-    if update_location_button.value and location_id:
+    if location_id:
         try:
             _resp = requests.patch(
-                f"{api_url_input.value}/v1/locations/{location_id}",
+                f"{api_url_input}/v1/locations/{location_id}",
                 headers={
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json; charset=utf-8",
                 },
                 json={
-                    "name": location_name_input.value,
-                    "type": location_type_input.value,
-                    "serviceId": service_id_input.value,
+                    "name": location_name_input,
+                    "type": location_type_input,
+                    "serviceId": service_id_input,
                 },
                 timeout=10,
             )
@@ -490,7 +486,7 @@ def _(
             )
             if updated_location and "error" in updated_location
             else mo.callout(
-                mo.md("Complete Step 3 first, then click **✏️ Update serviceId**."),
+                mo.md("Complete Step 3 first."),
                 kind="info",
             )
         )
